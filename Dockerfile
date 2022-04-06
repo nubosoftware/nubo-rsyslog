@@ -1,48 +1,38 @@
-FROM ubuntu:20.04
-RUN apt-get -y update
-# install linux packages
-RUN apt install -y \
-    curl \
-    vim \
-    iputils-ping \
-    telnet \
-    dnsutils \
-    net-tools
-
-
-# install nodejs
-RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash -
-RUN apt install -y nodejs
+FROM node:16-alpine3.15
+ARG BUILD_VER=3.2
+ARG TARGET_DIR=/opt/nubo-rsyslog
 
 # mark this as docker installation
 RUN mkdir -p /etc/.nubo/ && \
     touch  /etc/.nubo/.docker
 
-# install the node project
-RUN mkdir -p /opt/nubo-rsyslog/log
-COPY src /opt/nubo-rsyslog/src
-COPY package.json /opt/nubo-rsyslog
-RUN cd /opt/nubo-rsyslog \
-    && npm i
+RUN mkdir -p ${TARGET_DIR}/log
+RUN chown -R node:node ${TARGET_DIR}
 
+# Run with user nubo
+USER node
+
+# install the node project
+
+COPY src ${TARGET_DIR}/src
+COPY package.json ${TARGET_DIR}
+WORKDIR ${TARGET_DIR}
+RUN npm i
+RUN echo "VERSION: ${BUILD_VER}" > version.txt
 
 # configure
 ADD bin /usr/bin
 
 # Create a new user nubo
-ARG UID=1000
-ARG GID=1000
-RUN groupadd --gid $GID nubo
-RUN useradd --system --create-home --shell /usr/sbin/nologin --uid $UID --gid $GID nubo
+# ARG UID=1000
+# ARG GID=1000
+# RUN groupadd --gid $GID nubo
+# RUN useradd --system --create-home --shell /usr/sbin/nologin --uid $UID --gid $GID nubo
 
-RUN chown -R nubo:nubo /opt/nubo-rsyslog
 
-# Run with user nubo
-# USER nubo
 
 # Docker config
-VOLUME ["/opt/nubo-rsyslog/log"]
-WORKDIR /opt/nubo-rsyslog
+VOLUME ["${TARGET_DIR}/log"]
 EXPOSE 5514
 ENTRYPOINT ["/usr/bin/docker-entrypoint.sh"]
 CMD ["node","src/index.js"]
