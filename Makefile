@@ -16,15 +16,27 @@ endef
 $(eval $(call get_project_version,project))
 
 docker:
-	docker build --build-arg BUILD_VER=$(project_version)-$(project_buildid) -f ./Dockerfile -t nubo-rsyslog:$(project_version)-$(project_buildid) .
+	docker build --build-arg BUILD_VER=$(project_version)-$(project_buildid) --no-cache --pull -f ./Dockerfile -t nubo-rsyslog:$(project_version)-$(project_buildid) .
 
 push-nubo: docker
 	docker tag nubo-rsyslog:$(project_version)-$(project_buildid) docker.nubosoftware.com:5000/nubo/nubo-rsyslog:$(project_version)-$(project_buildid)
 	docker push docker.nubosoftware.com:5000/nubo/nubo-rsyslog:$(project_version)-$(project_buildid)
+	docker tag nubo-rsyslog:$(project_version)-$(project_buildid) docker.nubosoftware.com:5000/nubo/nubo-rsyslog:$(project_version)
+	docker push docker.nubosoftware.com:5000/nubo/nubo-rsyslog:$(project_version)
 
 push-nubo-latest: push-nubo
 	docker tag nubo-rsyslog:$(project_version)-$(project_buildid) docker.nubosoftware.com:5000/nubo/nubo-rsyslog
 	docker push docker.nubosoftware.com:5000/nubo/nubo-rsyslog
+
+push-hub: docker
+	docker tag nubo-rsyslog:$(project_version)-$(project_buildid) nubosoftware/nubo-rsyslog:$(project_version)-$(project_buildid)
+	docker push nubosoftware/nubo-rsyslog:$(project_version)-$(project_buildid)
+	docker tag nubo-rsyslog:$(project_version)-$(project_buildid) nubosoftware/nubo-rsyslog:$(project_version)
+	docker push nubosoftware/nubo-rsyslog:$(project_version)
+
+push-hub-latest: push-nubo
+	docker tag nubo-rsyslog:$(project_version)-$(project_buildid) nubosoftware/nubo-rsyslog
+	docker push nubosoftware/nubo-rsyslog
 
 
 version:
