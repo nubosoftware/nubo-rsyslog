@@ -10,6 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "commander": "^8.3.0",
+    "glossy": "^0.1.7",
     "mysql2": "^2.3.3",
     "sequelize": "^6.13.0",
     "syslog-server": "^1.0.1",

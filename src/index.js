@@ -47,8 +47,8 @@ function sleep(ms) {
 
 async function initDB(settings) {
     let cnt = 0
-    while (!db && cnt<10) {
-        cnt ++;
+    while (!db && cnt < 10) {
+        cnt++;
         try {
             let sequelizeLogs = settings.db.sequelizeLogs ? console.log : false;
             db = await DBLogsModel.initSequelize(settings.db.dbname, settings.db.user, settings.db.password, settings.db.host, settings.db.port, sequelizeLogs);
@@ -89,7 +89,7 @@ async function main() {
             error: 3,
             warning: 4,
             notice: 5,
-            info: 8,
+            info: 6,
             debug: 7
         },
         colors: {
@@ -144,7 +144,7 @@ async function main() {
     });
     addColors(syslogLevels.colors);
 
-    // read settings    
+    // read settings
     let settings;
     try {
         let settingsFiles = path.resolve(options.settings);
@@ -155,7 +155,7 @@ async function main() {
         console.error(err);
         settings = {};
     }
-    
+
     if (settings.db) {
         initDB(settings);
     } else {
@@ -163,7 +163,7 @@ async function main() {
     }
 
 
-
+    var syslogParser = require('glossy').Parse;
 
     // define SysLog server
     const server = new SyslogServer();
@@ -173,79 +173,95 @@ async function main() {
         // console.log(value.protocol); // the version of the IP protocol ("IPv4" or "IPv6")
         // console.log(value.message);  // the syslog message
         try {
-            let a = value.message.split(" ");
-            let pstr = a.shift();
-            const m = pstr.match(priregex);
-            const pri = m[1];
-            let severity = pri % 8;
-            let level = severityToLevel[severity];
-            let facility = (pri - severity) / 8;
-            let dstr = a.shift();
-            let d = new Date(dstr);
-            let hostname = a.shift();
-            let appid = a.shift();
-            let pid = a.shift();
-            let msgid = a.shift();
-            let sdata = a.shift();
-            let msg = a.join(" ").trim();
-            let mtype = "";
-            let logid = "";
-            let user = "";
-            let device = "";
-            let isjson = false;
-            // check if msg is json
-            try {
-                let obj = JSON.parse(msg);
-                isjson = true;
-                if (obj.mtype) {
-                    mtype = obj.mtype;
+            syslogParser.parse(value.message, function (parsedMessage) {
+                //console.log('-------syslogParser: ' + JSON.stringify(parsedMessage, null, 2));
+                // let level = severityToLevel[parsedMessage.severityID];
+                // let msg = parsedMessage.message;
+                // let d = new Date(parsedMessage.time);
+
+                // let a = value.message.split(" ");
+                // let pstr = a.shift();
+                // const m = pstr.match(priregex);
+                // const pri = m[1];
+                // let severity = pri % 8;
+                let severity = parsedMessage.severityID;
+                let level = severityToLevel[severity];
+                // let facility = (pri - severity) / 8;
+                let facility = parsedMessage.facilityID;
+                // let dstr = a.shift();
+                // let d = new Date(dstr);
+                let d = new Date(parsedMessage.time);
+                // let hostname = a.shift();
+                let hostname = parsedMessage.host;
+
+                // let appid = a.shift();
+                // let pid = a.shift();
+                let appid = parsedMessage.appName;
+                let pid = parsedMessage.pid;
+                // let msgid = a.shift();
+                // let sdata = a.shift();
+                // let msg = a.join(" ").trim();
+                let msg = parsedMessage.message;
+                let mtype = "";
+                let logid = "";
+                let user = "";
+                let device = "";
+                let isjson = false;
+                // check if msg is json
+                try {
+                    let obj = JSON.parse(msg);
+                    isjson = true;
+                    if (obj.mtype) {
+                        mtype = obj.mtype;
+                    }
+                    if (obj.logid) {
+                        logid = obj.logid;
+                    }
+                    if (obj.user) {
+                        user = obj.user;
+                    }
+                    if (obj.device) {
+                        device = obj.device;
+                    }
+                    if (obj.message) {
+                        msg = obj.message;
+                    }
+                } catch (e) {
+                    // ignore error
                 }
-                if (obj.logid) {
-                    logid = obj.logid;
+                //console.log(`pstr : ${pstr}, d: ${d}, hostname: ${hostname}, appid: ${appid}, pid: ${pid}, msgid: ${msgid}, sdata: ${sdata}, mtype: ${mtype}, logid: ${logid}, user: ${user}, msg: ${msg}, isjson: ${isjson}`);
+                logger.log({
+                    level: level,
+                    message: msg,
+                    hostname:hostname,
+                    app: `${appid}[${pid}]`,
+                    timestamp: d.toISOString()
+                });
+                if (db) {
+                    if (settings.insertAllToDB || mtype || user) {
+                        db.Log.create({
+                            Time: d,
+                            Facility: facility,
+                            LogLevel: severity,
+                            ServerName: hostname,
+                            Message: msg,
+                            Device: device,
+                            LoggerID: logid,
+                            DataCenter: "dc",
+                            User: user,
+                            MessageType: mtype,
+                            PID: pid,
+                            ComponentType: appid
+                        }).then(() => {
+                            //console.log(`Inserted into DB`);
+                        }).catch(err => {
+                            logger.info(`Database insert error: ${err}`);
+                            console.error(err);
+                        });
+                    }
                 }
-                if (obj.user) {
-                    user = obj.user;
-                }
-                if (obj.device) {
-                    device = obj.device;
-                }
-                if (obj.message) {
-                    msg = obj.message;
-                }
-            } catch (e) {
-                // ignore error
-            }
-            //console.log(`pstr : ${pstr}, d: ${d}, hostname: ${hostname}, appid: ${appid}, pid: ${pid}, msgid: ${msgid}, sdata: ${sdata}, mtype: ${mtype}, logid: ${logid}, user: ${user}, msg: ${msg}, isjson: ${isjson}`);
-            logger.log({
-                level: level,
-                message: msg,
-                hostname: hostname,
-                app: `${appid}[${pid}]`,
-                timestamp: d.toISOString()
+
             });
-            if (db) {
-                if (settings.insertAllToDB || mtype || user) {
-                    db.Log.create({
-                        Time: d,
-                        Facility: facility,
-                        LogLevel: severity,
-                        ServerName: hostname,
-                        Message: msg,
-                        Device: device,
-                        LoggerID: logid,
-                        DataCenter: "dc",
-                        User: user,
-                        MessageType: mtype,
-                        PID: pid,
-                        ComponentType: appid
-                    }).then(() => {
-                        //console.log(`Inserted into DB`);
-                    }).catch(err => {
-                        logger.info(`Database insert error: ${err}`);
-                        console.error(err);
-                    });
-                }
-            }
 
         } catch (e) {
             //console.log(`Syslog message parsing error: ${e}`);
@@ -258,7 +274,7 @@ async function main() {
     });
 
 
-    // insert into Logs (Time,                          Facility,           User,       LogLevel,          DataCenter, ServerName,    Message,       MessageType, LoggerID,    PID,        ComponentType ) 
+    // insert into Logs (Time,                          Facility,           User,       LogLevel,          DataCenter, ServerName,    Message,       MessageType, LoggerID,    PID,        ComponentType )
     //           values ('%timereported:::date-mysql%', '%syslogfacility%', '%$!user%','%syslogpriority%', '%$!dc%',   '%HOSTNAME%', '%$!message%', '%$!mtype%',  '%$!logid%', '%procid%', '%app-name%' )
     server.start({ port: options.port, address: options.host, exclusive: true });
 }
