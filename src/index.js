@@ -120,6 +120,7 @@ async function main() {
             handleExceptions: true,
             maxsize: options.maxsize,
             maxFiles: options.maxFiles,
+            tailable: true,
         })
     ];
 
@@ -137,7 +138,10 @@ async function main() {
             }),
             new transports.File({
                 filename: errorLogFileName,
-                json: false
+                json: false,
+                maxsize: options.maxsize,
+                maxFiles: options.maxFiles,
+                tailable: true,
             })
         ],
         exitOnError: false
