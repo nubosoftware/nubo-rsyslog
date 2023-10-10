@@ -120,6 +120,7 @@ async function main() {
             handleExceptions: true,
             maxsize: options.maxsize,
             maxFiles: options.maxFiles,
+            zippedArchive: true,
             tailable: true,
         })
     ];
