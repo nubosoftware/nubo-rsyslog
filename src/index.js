@@ -27,7 +27,8 @@ program
     .option('--maxsize <bytes>', 'Maximum log file size in bytes', 100 * 1024 * 1024)
     .option('--maxFiles <number>', 'Maximum number of log file', 4)
     .option('-p, --port <port>', 'Listen UDP port', 5514)
-    .option('-h, --host <host>', 'Listen Address', '0.0.0.0');
+    .option('-h, --host <host>', 'Listen Address', '0.0.0.0')
+    .option('--zippedArchive', 'Enable zipped archive', false);
 program.parse(process.arg);
 const options = program.opts();
 options.log = path.resolve(options.log);
@@ -120,7 +121,7 @@ async function main() {
             handleExceptions: true,
             maxsize: options.maxsize,
             maxFiles: options.maxFiles,
-            zippedArchive: true,
+            zippedArchive: options.zippedArchive || false,
             tailable: true,
         })
     ];
