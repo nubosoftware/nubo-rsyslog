@@ -7,6 +7,8 @@ RUN mkdir -p /etc/.nubo/ && \
     touch  /etc/.nubo/.docker
 
 RUN mkdir -p ${TARGET_DIR}/log
+# Node diagnostic reports (kept in the container, not on the log volume, which may be what hangs)
+RUN mkdir -p ${TARGET_DIR}/reports
 RUN chown -R node:node ${TARGET_DIR}
 
 # Run with user nubo
@@ -35,4 +37,4 @@ ADD bin /usr/bin
 VOLUME ["${TARGET_DIR}/log"]
 EXPOSE 5514
 ENTRYPOINT ["/usr/bin/docker-entrypoint.sh"]
-CMD ["node","src/index.js"]
+CMD ["node","--report-on-signal","--report-directory=/opt/nubo-rsyslog/reports","src/index.js"]

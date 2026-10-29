@@ -17,6 +17,7 @@ const SyslogServer = require("syslog-server");
 const priregex = /<([0-9]+)>1/;
 const fsp = require('fs').promises;
 const DBLogsModel = require('./DBLogsModel');
+const { startSelfCheck, isProbe } = require('./selfcheck');
 const { isBooleanObject } = require('util/types');
 
 program.version('0.0.1');
@@ -28,7 +29,9 @@ program
     .option('--maxFiles <number>', 'Maximum number of log file', 4)
     .option('-p, --port <port>', 'Listen UDP port', 5514)
     .option('-h, --host <host>', 'Listen Address', '0.0.0.0')
-    .option('--zippedArchive', 'Enable zipped archive', false);
+    .option('--zippedArchive', 'Enable zipped archive', false)
+    .option('--selfcheck-interval <seconds>', 'Send a self-check probe every N seconds; exit if it is not written (0 disables)', 300)
+    .option('--selfcheck-timeout <seconds>', 'Seconds to wait for a self-check probe to be written', 30);
 program.parse(process.arg);
 const options = program.opts();
 options.log = path.resolve(options.log);
@@ -146,7 +149,8 @@ async function main() {
                 tailable: true,
             })
         ],
-        exitOnError: false
+        // exit after an uncaught exception (Docker restarts us) instead of running on without listening
+        exitOnError: true
     });
     addColors(syslogLevels.colors);
 
@@ -243,7 +247,7 @@ async function main() {
                     app: `${appid}[${pid}]`,
                     timestamp: d.toISOString()
                 });
-                if (db) {
+                if (db && !isProbe(msg)) {
                     if (settings.insertAllToDB || mtype || user) {
                         db.Log.create({
                             Time: d,
@@ -282,7 +286,67 @@ async function main() {
 
     // insert into Logs (Time,                          Facility,           User,       LogLevel,          DataCenter, ServerName,    Message,       MessageType, LoggerID,    PID,        ComponentType )
     //           values ('%timereported:::date-mysql%', '%syslogfacility%', '%$!user%','%syslogpriority%', '%$!dc%',   '%HOSTNAME%', '%$!message%', '%$!mtype%',  '%$!logid%', '%procid%', '%app-name%' )
-    server.start({ port: options.port, address: options.host, exclusive: true });
+    // A closed or failed socket leaves the process alive but deaf: exit so Docker restarts us.
+    server.on("error", (err) => die(`Syslog server error: ${err && (err.error || err.message || err)}`));
+    server.on("stop", () => die(`Syslog server socket closed`));
+    try {
+        await server.start({ port: Number(options.port), address: options.host, exclusive: true });
+    } catch (err) {
+        die(`Syslog server failed to start on ${options.host}:${options.port}: ${err && err.error && err.error.message || err.message || err}`);
+    }
+
+    const interval = Number(options.selfcheckInterval);
+    if (interval > 0) {
+        startSelfCheck({
+            port: Number(options.port),
+            intervalMs: interval * 1000,
+            timeoutMs: Number(options.selfcheckTimeout) * 1000,
+            verify: (id) => logTailsContain(id),
+            onFail: die,
+        });
+    }
+}
+
+// Stop for good so Docker's restart policy restarts us. Write straight to stderr, not through the logger
+// (logging may be what is stuck), and SIGKILL ourselves: process.exit() waits for libuv worker threads
+// and hangs if one is stuck in a file system call.
+function die(reason) {
+    const fs = require('fs');
+    fs.writeSync(2, `${new Date().toISOString()} ${reason}, killing the process\n`);
+    // Node diagnostic report (stacks, handles, libuv state) for the root cause, only when a report
+    // directory is configured (the image sets --report-directory)
+    if (process.report && process.report.directory) {
+        try {
+            const file = process.report.writeReport();
+            fs.writeSync(2, `diagnostic report written to ${path.resolve(process.report.directory, file)}\n`);
+        } catch (e) {
+            fs.writeSync(2, `diagnostic report failed: ${e.message}\n`);
+        }
+    }
+    process.kill(process.pid, 'SIGKILL');
+}
+
+// Is `id` in the last 1 MB of the current log file or of the newest rotated one (tailable rotation
+// renames nubo.log to nubo1.log)? May never settle if the file system hangs; the self-check's
+// deadline covers that.
+async function logTailsContain(id) {
+    const { dir, name, ext } = path.parse(options.log);
+    for (const file of [options.log, path.join(dir, `${name}1${ext}`)]) {
+        let fh;
+        try {
+            fh = await fsp.open(file, 'r');
+            const { size } = await fh.stat();
+            const len = Math.min(size, 1024 * 1024);
+            const buf = Buffer.alloc(len);
+            await fh.read(buf, 0, len, size - len);
+            if (buf.toString('utf8').includes(id)) return true;
+        } catch (e) {
+            // missing rotated file etc.: not found here
+        } finally {
+            if (fh) await fh.close().catch(() => {});
+        }
+    }
+    return false;
 }
 
 async function insertLogToDB(obj,) {
