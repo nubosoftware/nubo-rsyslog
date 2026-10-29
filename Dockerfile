@@ -1,4 +1,4 @@
-FROM node:16-alpine3.15
+FROM node:24-alpine
 ARG BUILD_VER=3.2
 ARG TARGET_DIR=/opt/nubo-rsyslog
 
